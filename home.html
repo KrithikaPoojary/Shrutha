@@ -1,0 +1,1001 @@
+<?php
+// Database configuration
+define('DB_SERVER', 'localhost');
+define('DB_USERNAME', 'root');
+define('DB_PASSWORD', '');
+define('DB_NAME', 'employee_portal');
+
+// Create connection
+$conn = mysqli_connect(DB_SERVER, DB_USERNAME, DB_PASSWORD, DB_NAME);
+
+// Check connection
+if($conn === false){
+    die("ERROR: Could not connect. " . mysqli_connect_error());
+}
+
+// Start session
+session_start();
+
+// Handle logout
+if(isset($_GET['logout'])){
+    session_destroy();
+    header("Location: index.php");
+    exit;
+}
+
+// Handle login
+if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['login'])){
+    $email = $_POST['email'];
+    $password = $_POST['password'];
+    
+    $sql = "SELECT id, name, email, password, role FROM users WHERE email = ?";
+    if($stmt = mysqli_prepare($conn, $sql)){
+        mysqli_stmt_bind_param($stmt, "s", $email);
+        if(mysqli_stmt_execute($stmt)){
+            mysqli_stmt_store_result($stmt);
+            if(mysqli_stmt_num_rows($stmt) == 1){
+                mysqli_stmt_bind_result($stmt, $id, $name, $email, $hashed_password, $role);
+                if(mysqli_stmt_fetch($stmt)){
+                    if(password_verify($password, $hashed_password)){
+                        $_SESSION['user'] = $id;
+                        $_SESSION['name'] = $name;
+                        $_SESSION['role'] = $role;
+                        
+                        // Redirect to appropriate dashboard
+                        if($role == 'admin'){
+                            header("Location: admin_dashboard.php");
+                        } else {
+                            header("Location: user_dashboard.php");
+                        }
+                        exit;
+                    } else {
+                        $login_error = "Invalid password.";
+                    }
+                }
+            } else {
+                $login_error = "Email not found.";
+            }
+        }
+        mysqli_stmt_close($stmt);
+    }
+}
+
+// Handle registration
+if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['register'])){
+    $name = $_POST['name'];
+    $email = $_POST['email'];
+    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+    $role = 'user'; // Default role
+    
+    $sql = "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)";
+    if($stmt = mysqli_prepare($conn, $sql)){
+        mysqli_stmt_bind_param($stmt, "ssss", $name, $email, $password, $role);
+        if(mysqli_stmt_execute($stmt)){
+            $registration_success = true;
+        } else {
+            $registration_error = "Error: " . mysqli_error($conn);
+        }
+        mysqli_stmt_close($stmt);
+    }
+}
+
+// Handle form submission
+if($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_employee_form'])){
+    // Get form data
+    $user_id = $_SESSION['user'];
+    $employee_id = $_POST['employee_id'];
+    $full_name = $_POST['full_name'];
+    $phone = $_POST['phone'];
+    $email = $_POST['email'];
+    $address = $_POST['address'];
+    $dob = $_POST['dob'];
+    $doj = $_POST['doj'];
+    $completion_date = $_POST['completion_date'];
+    $father_name = $_POST['father_name'];
+    $mother_name = $_POST['mother_name'];
+    $parents_phone = $_POST['parents_phone'];
+    $college_name = $_POST['college_name'];
+    $hod_name = $_POST['hod_name'];
+    $hod_phone = $_POST['hod_phone'];
+    $guide_name = $_POST['guide_name'];
+    $guide_phone = $_POST['guide_phone'];
+    $placement_officer = $_POST['placement_officer'];
+    $placement_officer_phone = $_POST['placement_officer_phone'];
+    $referred_from = $_POST['referred_from'];
+    $reference_number = $_POST['reference_number'];
+    
+    // Handle file uploads
+    $resume_path = uploadFile('resume', 'uploads/resumes/');
+    $photo_path = uploadFile('photo', 'uploads/photos/');
+    $certificates_path = uploadFile('certificates', 'uploads/certificates/');
+    $ppt_path = uploadFile('ppt', 'uploads/ppt/');
+    
+    // Save to database
+    $sql = "INSERT INTO employee_details (
+        user_id, employee_id, full_name, phone, email, address, dob, doj, completion_date,
+        father_name, mother_name, parents_phone, college_name, hod_name, hod_phone,
+        guide_name, guide_phone, placement_officer, placement_officer_phone,
+        referred_from, reference_number, resume_path, photo_path, certificates_path, ppt_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    
+    if($stmt = mysqli_prepare($conn, $sql)){
+        mysqli_stmt_bind_param($stmt, "isssssssssssssssssssssss", 
+            $user_id, $employee_id, $full_name, $phone, $email, $address, $dob, $doj, $completion_date,
+            $father_name, $mother_name, $parents_phone, $college_name, $hod_name, $hod_phone,
+            $guide_name, $guide_phone, $placement_officer, $placement_officer_phone,
+            $referred_from, $reference_number, $resume_path, $photo_path, $certificates_path, $ppt_path
+        );
+        
+        if(mysqli_stmt_execute($stmt)){
+            $form_success = true;
+        } else {
+            $form_error = "Error: " . mysqli_error($conn);
+        }
+        mysqli_stmt_close($stmt);
+    }
+}
+
+// Function to handle file uploads
+function uploadFile($inputName, $targetDir) {
+    if(isset($_FILES[$inputName]) && $_FILES[$inputName]['error'] == UPLOAD_ERR_OK) {
+        $fileTmpPath = $_FILES[$inputName]['tmp_name'];
+        $fileName = $_FILES[$inputName]['name'];
+        $fileSize = $_FILES[$inputName]['size'];
+        $fileType = $_FILES[$inputName]['type'];
+        $fileNameCmps = explode(".", $fileName);
+        $fileExtension = strtolower(end($fileNameCmps));
+
+        // Generate unique file name
+        $newFileName = md5(time() . $fileName) . '.' . $fileExtension;
+        $destPath = $targetDir . $newFileName;
+
+        if(move_uploaded_file($fileTmpPath, $destPath)) {
+            return $destPath;
+        }
+    }
+    return '';
+}
+
+// Get job listings
+$jobs = [];
+$sql = "SELECT * FROM jobs ORDER BY posted_date DESC LIMIT 5";
+if($result = mysqli_query($conn, $sql)){
+    while($row = mysqli_fetch_assoc($result)){
+        $jobs[] = $row;
+    }
+}
+
+// Get visitor diaries
+$diaries = [];
+$sql = "SELECT * FROM visitor_diaries ORDER BY created_at DESC LIMIT 5";
+if($result = mysqli_query($conn, $sql)){
+    while($row = mysqli_fetch_assoc($result)){
+        $diaries[] = $row;
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Portal - Job Management System</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4361ee;
+            --primary-dark: #3a56d4;
+            --primary-light: #ebf5ff;
+            --secondary: #3f37c9;
+            --accent: #4895ef;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --dark: #1a1f36;
+            --light: #f8fafc;
+            --gray: #94a3b8;
+            --white: #ffffff;
+            --gradient-start: #4361ee;
+            --gradient-end: #3f37c9;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--light);
+            color: var(--dark);
+            line-height: 1.6;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+
+        .navbar {
+            background: linear-gradient(to right, var(--gradient-start), var(--gradient-end));
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-link {
+            color: rgba(255,255,255,0.9) !important;
+            transition: all 0.3s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            font-weight: 500;
+            position: relative;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            color: var(--white) !important;
+            background-color: rgba(255,255,255,0.15);
+        }
+
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 10%;
+            width: 80%;
+            height: 2px;
+            background: var(--white);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .nav-link:hover::after, .nav-link.active::after {
+            transform: scaleX(1);
+        }
+
+        .hero-section {
+            background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('https://images.unsplash.com/photo-1497366754035-f200968a6e72?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
+            background-size: cover;
+            background-position: center;
+            color: white;
+            padding: 120px 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, transparent 0%, rgba(0,0,0,0.8) 100%);
+        }
+
+        .feature-card {
+            background-color: var(--white);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+            border: none;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            z-index: -1;
+            transition: height 0.4s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+        }
+
+        .feature-card:hover::before {
+            height: 100%;
+        }
+
+        .feature-card:hover * {
+            color: white !important;
+        }
+
+        .feature-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--accent-light) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: var(--primary);
+            font-size: 2rem;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover .feature-icon {
+            background: rgba(255,255,255,0.2);
+            color: white;
+        }
+
+        .jobs-carousel {
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--accent-light) 100%);
+            border-radius: 20px;
+            padding: 30px;
+            margin: 50px 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .jobs-carousel::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+            transform: rotate(30deg);
+        }
+
+        .job-slide {
+            padding: 25px;
+            background-color: var(--white);
+            border-radius: 15px;
+            margin: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+            border-left: 4px solid var(--primary);
+        }
+
+        .job-slide:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .job-badge {
+            background: linear-gradient(to right, var(--accent), var(--secondary));
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            box-shadow: 0 4px 10px rgba(67, 97, 238, 0.3);
+        }
+
+        .diary-card {
+            background-color: var(--white);
+            border-radius: 16px;
+            padding: 25px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.05);
+            margin-bottom: 25px;
+            transition: all 0.3s ease;
+            border-top: 3px solid var(--primary);
+        }
+
+        .diary-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+        }
+
+        .diary-meta {
+            font-size: 0.9rem;
+            color: var(--gray);
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .diary-meta i {
+            margin-right: 5px;
+        }
+
+        .footer {
+            background: linear-gradient(to right, var(--dark) 0%, #0f172a 100%);
+            color: var(--white);
+            padding: 70px 0 30px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .footer::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%231e293b' fill-opacity='0.1' fill-rule='evenodd'/%3E%3C/svg%3E");
+            opacity: 0.1;
+        }
+
+        .social-links a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background-color: rgba(255,255,255,0.1);
+            color: var(--white);
+            margin-right: 12px;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-size: 1.2rem;
+        }
+
+        .social-links a:hover {
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(67, 97, 238, 0.3);
+        }
+
+        .form-section {
+            background-color: var(--white);
+            border-radius: 20px;
+            padding: 35px;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.08);
+            margin: 40px 0;
+            border-top: 4px solid var(--primary);
+            transition: all 0.4s ease;
+        }
+
+        .form-section:hover {
+            box-shadow: 0 20px 50px rgba(0,0,0,0.12);
+        }
+
+        .section-title {
+            position: relative;
+            padding-bottom: 15px;
+            margin-bottom: 30px;
+            font-weight: 700;
+        }
+
+        .section-title::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 70px;
+            height: 4px;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            border-radius: 2px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            border: none;
+            padding: 10px 25px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 20px rgba(67, 97, 238, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 25px rgba(67, 97, 238, 0.4);
+            background: linear-gradient(to right, var(--primary-dark), var(--secondary));
+        }
+
+        .btn-outline-primary {
+            border: 2px solid var(--primary);
+            color: var(--primary);
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-outline-primary:hover {
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            color: white;
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(67, 97, 238, 0.3);
+            border-color: transparent;
+        }
+
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 700;
+            color: var(--primary);
+            line-height: 1;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .feature-list li {
+            margin-bottom: 15px;
+            padding-left: 30px;
+            position: relative;
+        }
+
+        .feature-list li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 8px;
+            width: 18px;
+            height: 18px;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            border-radius: 50%;
+        }
+
+        .feature-list li i {
+            position: absolute;
+            left: 3px;
+            top: 10px;
+            color: white;
+            font-size: 0.7rem;
+            z-index: 1;
+        }
+
+        .counter-box {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            text-align: center;
+            transition: all 0.4s ease;
+        }
+
+        .counter-box:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.12);
+        }
+
+        .counter {
+            font-size: 3.5rem;
+            font-weight: 700;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .counter-label {
+            font-size: 1.1rem;
+            color: var(--gray);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+
+        .floating {
+            animation: floating 6s ease-in-out infinite;
+        }
+
+        @keyframes floating {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-15px); }
+            100% { transform: translateY(0px); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="index.php">
+                <i class="fas fa-briefcase"></i> Employee Portal
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="index.php">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="about.php">About</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="visitor_diaries.php">Visitor Diaries</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="jobs.php">Job Listings</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="resources.php">Resources</a>
+                    </li>
+                </ul>
+                <div class="d-flex">
+                    <?php if(isset($_SESSION['user'])): ?>
+                        <div class="dropdown">
+                            <button class="btn btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-user me-2"></i> <?php echo $_SESSION['name']; ?>
+                            </button>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="user_dashboard.php"><i class="fas fa-tachometer-alt me-2"></i> Dashboard</a></li>
+                                <li><a class="dropdown-item" href="profile.php"><i class="fas fa-user-cog me-2"></i> Profile</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item text-danger" href="?logout=true"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
+                            </ul>
+                        </div>
+                    <?php else: ?>
+                        <a href="login.php" class="btn btn-outline-light me-2"><i class="fas fa-sign-in-alt me-2"></i> Login</a>
+                        <a href="signup.php" class="btn btn-light"><i class="fas fa-user-plus me-2"></i> Sign Up</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-lg-8 text-center position-relative">
+                    <h1 class="display-4 fw-bold mb-4">Find Your Dream Job with Our Employee Portal</h1>
+                    <p class="lead mb-5">Streamline your job search, build your resume, and connect with employers all in one place.</p>
+                    <div class="d-flex justify-content-center gap-3 flex-wrap">
+                        <?php if(isset($_SESSION['user'])): ?>
+                            <a href="user_dashboard.php" class="btn btn-primary btn-lg px-4"><i class="fas fa-tachometer-alt me-2"></i> Go to Dashboard</a>
+                        <?php else: ?>
+                            <a href="signup.php" class="btn btn-primary btn-lg px-4 pulse"><i class="fas fa-user-plus me-2"></i> Get Started</a>
+                        <?php endif; ?>
+                        <a href="jobs.php" class="btn btn-outline-light btn-lg px-4"><i class="fas fa-briefcase me-2"></i> Browse Jobs</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="py-5 bg-white">
+        <div class="container">
+            <div class="row g-4">
+                <div class="col-md-3">
+                    <div class="counter-box">
+                        <div class="counter">1,250+</div>
+                        <div class="counter-label">Jobs Available</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="counter-box">
+                        <div class="counter">750+</div>
+                        <div class="counter-label">Companies Hiring</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="counter-box">
+                        <div class="counter">15,000+</div>
+                        <div class="counter-label">Active Users</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="counter-box">
+                        <div class="counter">95%</div>
+                        <div class="counter-label">Success Rate</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="py-5">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2 class="fw-bold">Why Choose Our Employee Portal</h2>
+                <p class="lead text-muted">We provide everything you need for a successful job search</p>
+            </div>
+            
+            <div class="row g-4">
+                <div class="col-md-6 col-lg-3">
+                    <div class="feature-card text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-search"></i>
+                        </div>
+                        <h4>Job Search</h4>
+                        <p>Find thousands of job listings from top companies in various industries.</p>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-3">
+                    <div class="feature-card text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <h4>Resume Builder</h4>
+                        <p>Create professional resumes that stand out to employers with our easy-to-use tools.</p>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-3">
+                    <div class="feature-card text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-bell"></i>
+                        </div>
+                        <h4>Job Alerts</h4>
+                        <p>Get notified when new jobs matching your criteria become available.</p>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-3">
+                    <div class="feature-card text-center">
+                        <div class="feature-icon">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <h4>Career Insights</h4>
+                        <p>Access valuable career resources, salary data, and industry trends.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Job Listings Carousel -->
+    <section class="py-5">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="fw-bold">Latest Job Opportunities</h2>
+                <a href="jobs.php" class="btn btn-outline-primary">View All Jobs <i class="fas fa-arrow-right ms-2"></i></a>
+            </div>
+            
+            <div class="jobs-carousel">
+                <div id="jobCarousel" class="carousel slide" data-bs-ride="carousel">
+                    <div class="carousel-inner">
+                        <?php if(!empty($jobs)): ?>
+                            <?php foreach($jobs as $index => $job): ?>
+                                <div class="carousel-item <?php echo $index === 0 ? 'active' : ''; ?>">
+                                    <div class="job-slide">
+                                        <div class="d-flex justify-content-between align-items-center mb-3">
+                                            <h4 class="mb-0"><?php echo htmlspecialchars($job['title']); ?></h4>
+                                            <span class="job-badge"><?php echo htmlspecialchars($job['type']); ?></span>
+                                        </div>
+                                        <p class="text-muted mb-3"><?php echo htmlspecialchars($job['company']); ?> - <?php echo htmlspecialchars($job['location']); ?></p>
+                                        <p><?php echo substr(htmlspecialchars($job['description']), 0, 150); ?>...</p>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <span class="text-primary fw-bold">$<?php echo number_format($job['salary']); ?>/yr</span>
+                                            <a href="job_details.php?id=<?php echo $job['id']; ?>" class="btn btn-sm btn-primary">Apply Now</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="carousel-item active">
+                                <div class="job-slide text-center py-4">
+                                    <h4>No job listings available at the moment</h4>
+                                    <p class="text-muted">Check back later for new opportunities</p>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    <button class="carousel-control-prev" type="button" data-bs-target="#jobCarousel" data-bs-slide="prev">
+                        <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Previous</span>
+                    </button>
+                    <button class="carousel-control-next" type="button" data-bs-target="#jobCarousel" data-bs-slide="next">
+                        <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                        <span class="visually-hidden">Next</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Registration Section -->
+    <section class="py-5">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-lg-6 mb-5 mb-lg-0">
+                    <h2 class="fw-bold mb-4">Ready to Advance Your Career?</h2>
+                    <p class="lead text-muted mb-4">Join thousands of professionals who have found their dream jobs through our portal.</p>
+                    <ul class="feature-list list-unstyled">
+                        <li><i class="fas fa-check"></i> Create a professional resume in minutes</li>
+                        <li><i class="fas fa-check"></i> Get matched with relevant job opportunities</li>
+                        <li><i class="fas fa-check"></i> Track your applications in one place</li>
+                        <li><i class="fas fa-check"></i> Receive personalized career advice</li>
+                        <li><i class="fas fa-check"></i> Connect with industry professionals</li>
+                        <li><i class="fas fa-check"></i> Access exclusive training resources</li>
+                    </ul>
+                    <a href="signup.php" class="btn btn-primary btn-lg mt-3 pulse"><i class="fas fa-user-plus me-2"></i> Sign Up Now</a>
+                </div>
+                <div class="col-lg-6">
+                    <div class="form-section floating">
+                        <h3 class="section-title">Login to Your Account</h3>
+                        <?php if(isset($login_error)): ?>
+                            <div class="alert alert-danger"><?php echo $login_error; ?></div>
+                        <?php endif; ?>
+                        <form method="POST" action="">
+                            <div class="mb-3">
+                                <label for="email" class="form-label">Email Address</label>
+                                <input type="email" class="form-control form-control-lg" id="email" name="email" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="password" class="form-label">Password</label>
+                                <input type="password" class="form-control form-control-lg" id="password" name="password" required>
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="remember">
+                                <label class="form-check-label" for="remember">Remember me</label>
+                            </div>
+                            <button type="submit" name="login" class="btn btn-primary w-100 btn-lg">Login</button>
+                            <div class="text-center mt-3">
+                                <a href="forgot_password.php">Forgot Password?</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Visitor Diaries Section -->
+    <section class="py-5 bg-light">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2 class="fw-bold">Visitor Diaries</h2>
+                <a href="visitor_diaries.php" class="btn btn-outline-primary">View All Diaries <i class="fas fa-arrow-right ms-2"></i></a>
+            </div>
+            
+            <div class="row">
+                <?php if(!empty($diaries)): ?>
+                    <?php foreach($diaries as $diary): ?>
+                        <div class="col-md-4 mb-4">
+                            <div class="diary-card">
+                                <h5><?php echo htmlspecialchars($diary['title']); ?></h5>
+                                <div class="diary-meta">
+                                    <span><i class="fas fa-user me-1"></i><?php echo htmlspecialchars($diary['author']); ?></span>
+                                    <span><i class="fas fa-calendar me-1"></i><?php echo date('M d, Y', strtotime($diary['created_at'])); ?></span>
+                                </div>
+                                <p><?php echo substr(htmlspecialchars($diary['content']), 0, 150); ?>...</p>
+                                <a href="diary_details.php?id=<?php echo $diary['id']; ?>" class="btn btn-sm btn-outline-primary">Read More</a>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="col-12 text-center py-5">
+                        <h4>No visitor diaries available</h4>
+                        <p class="text-muted">Check back later for updates</p>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials Section -->
+    <section class="py-5">
+        <div class="container">
+            <div class="text-center mb-5">
+                <h2 class="fw-bold">Success Stories</h2>
+                <p class="lead text-muted">What our users say about us</p>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <div class="diary-card">
+                        <div class="d-flex align-items-center mb-3">
+                            <img src="https://randomuser.me/api/portraits/women/32.jpg" class="rounded-circle me-3" width="60" height="60" alt="User">
+                            <div>
+                                <h5 class="mb-0">Sarah Johnson</h5>
+                                <p class="text-muted mb-0">Software Engineer at Google</p>
+                            </div>
+                        </div>
+                        <p class="mb-0">"The Employee Portal helped me land my dream job at Google. The resume builder and interview prep resources were invaluable!"</p>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="diary-card">
+                        <div class="d-flex align-items-center mb-3">
+                            <img src="https://randomuser.me/api/portraits/men/44.jpg" class="rounded-circle me-3" width="60" height="60" alt="User">
+                            <div>
+                                <h5 class="mb-0">Michael Chen</h5>
+                                <p class="text-muted mb-0">Product Manager at Microsoft</p>
+                            </div>
+                        </div>
+                        <p class="mb-0">"I received 3 job offers within a month of using this portal. The job matching algorithm is incredibly accurate."</p>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="diary-card">
+                        <div class="d-flex align-items-center mb-3">
+                            <img src="https://randomuser.me/api/portraits/women/68.jpg" class="rounded-circle me-3" width="60" height="60" alt="User">
+                            <div>
+                                <h5 class="mb-0">Emma Rodriguez</h5>
+                                <p class="text-muted mb-0">Data Scientist at Amazon</p>
+                            </div>
+                        </div>
+                        <p class="mb-0">"The career resources helped me negotiate a 30% higher salary than my initial offer. This portal is a game-changer!"</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="row g-5">
+                <div class="col-lg-4">
+                    <h3 class="text-white mb-4"><i class="fas fa-briefcase me-2"></i> Employee Portal</h3>
+                    <p class="text-muted">Connecting talented professionals with top employers to build successful careers and thriving organizations.</p>
+                    <div class="social-links mt-4">
+                        <a href="#"><i class="fab fa-facebook-f"></i></a>
+                        <a href="#"><i class="fab fa-twitter"></i></a>
+                        <a href="#"><i class="fab fa-linkedin-in"></i></a>
+                        <a href="#"><i class="fab fa-instagram"></i></a>
+                        <a href="#"><i class="fab fa-youtube"></i></a>
+                    </div>
+                </div>
+                <div class="col-lg-2 col-md-6">
+                    <h5 class="text-white mb-4">Quick Links</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="index.php">Home</a></li>
+                        <li class="mb-2"><a href="about.php">About Us</a></li>
+                        <li class="mb-2"><a href="jobs.php">Job Listings</a></li>
+                        <li class="mb-2"><a href="resources.php">Resources</a></li>
+                        <li class="mb-2"><a href="contact.php">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <h5 class="text-white mb-4">Resources</h5>
+                    <ul class="list-unstyled">
+                        <li class="mb-2"><a href="resume_tips.php">Resume Tips</a></li>
+                        <li class="mb-2"><a href="interview_prep.php">Interview Preparation</a></li>
+                        <li class="mb-2"><a href="career_advice.php">Career Advice</a></li>
+                        <li class="mb-2"><a href="salary_guide.php">Salary Guide</a></li>
+                        <li class="mb-2"><a href="webinars.php">Webinars</a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-3">
+                    <h5 class="text-white mb-4">Contact Us</h5>
+                    <ul class="list-unstyled text-muted">
+                        <li class="mb-2"><i class="fas fa-map-marker-alt me-2"></i> 123 Career St, New York, NY 10001</li>
+                        <li class="mb-2"><i class="fas fa-phone-alt me-2"></i> +1 (555) 123-4567</li>
+                        <li class="mb-2"><i class="fas fa-envelope me-2"></i> info@employeeportal.com</li>
+                        <li class="mb-2"><i class="fas fa-clock me-2"></i> Mon-Fri: 9AM - 6PM</li>
+                    </ul>
+                </div>
+            </div>
+            <hr class="mt-4 mb-4 border-secondary">
+            <div class="row">
+                <div class="col-md-6 text-center text-md-start">
+                    <p class="text-muted mb-0">&copy; 2023 Employee Portal. All rights reserved.</p>
+                </div>
+                <div class="col-md-6 text-center text-md-end">
+                    <p class="text-muted mb-0">Designed with <i class="fas fa-heart text-danger"></i> for job seekers</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Auto-advance carousel every 5 seconds
+        const jobCarousel = document.getElementById('jobCarousel');
+        const carousel = new bootstrap.Carousel(jobCarousel, {
+            interval: 5000
+        });
+        
+        // Initialize tooltips
+        const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        const tooltipList = [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+        
+        // Floating animation for feature cards
+        document.querySelectorAll('.feature-card').forEach((card, index) => {
+            card.style.animationDelay = `${index * 0.1}s`;
+        });
+    </script>
+</body>
+</html>
